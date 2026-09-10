@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>店舗QRチェッカー</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 16px; background-color: #f8fafc; color: #1e293b;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .container { width: 100%; max-width: 480px; }
+    #reader { width: 100%; min-height: 250px; background: #000; border-radius: 8px; overflow: hidden; }
+    .btn {
+      display: block; width: 100%; padding: 14px; margin: 12px 0;
+      background: #2563eb; color: #fff; border: none; border-radius: 8px;
+      font-size: 1rem; font-weight: bold; cursor: pointer;
+    }
+    #log {
+      margin-top: 10px; padding: 10px; background: #fee2e2; color: #991b1b;
+      border-radius: 6px; font-size: 0.85rem; display: none; word-break: break-all;
+    }
+    .card {
+      background: #fff; border-radius: 12px; padding: 20px; margin-top: 16px;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2 style="text-align: center;">店舗情報スキャナー</h2>
+  
+  <button id="startBtn" class="btn" onclick="initCamera()">カメラを起動してスキャン</button>
+  <div id="reader"></div>
+  <div id="log"></div>
+
+  <div id="resultCard" class="card">
+    <span id="shopCategory" style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:4px; font-size:0.85rem;"></span>
+    <h3 id="shopName" style="margin: 8px 0; color:#2563eb;"></h3>
+    <p><strong>住所:</strong> <span id="shopAddress"></span></p>
+    <p><strong>営業時間:</strong> <span id="shopHours"></span></p>
+    <p><strong>備考:</strong> <span id="shopNotes"></span></p>
+  </div>
+</div>
+
+<script>
+  const GAS_ENDPOINT = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec";
+  let html5QrCode = null;
+
+  function showError(msg) {
+    const logBox = document.getElementById("log");
+    logBox.innerText = msg;
+    logBox.style.display = "block";
+  }
+
+  async function initCamera() {
+    document.getElementById("log").style.display = "none";
+    document.getElementById("startBtn").style.display = "none";
+
+    try {
+      html5QrCode = new Html5Qrcode("reader");
+
+      // 利用可能なカメラ一覧を取得して最初/外側のカメラを使用
+      const devices = await Html5Qrcode.getCameras();
+      if (!devices || devices.length === 0) {
+        showError("利用可能なカメラが見つかりませんでした。");
+        document.getElementById("startBtn").style.display = "block";
+        return;
+      }
+
+      // スマホなら背面カメラ、PCならデフォルトカメラ
+      const cameraId = devices.length > 1 ? devices[devices.length - 1].id : devices[0].id;
+
+      await html5QrCode.start(
+        cameraId,
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        onScanSuccess,
+        () => {}
+      );
+    } catch (err) {
+      showError("カメラ起動エラー: " + err.name + " - " + err.message + 
+                 "\n※Googleサイトの埋め込み枠内ではカメラ権限が拒否される仕様があります。別タブで直接開く形をお試しください。");
+      document.getElementById("startBtn").style.display = "block";
+    }
+  }
+
+  async function onScanSuccess(decodedText) {
+    if (html5QrCode) {
+      await html5QrCode.stop();
+      document.getElementById("reader").innerHTML = "";
+    }
+
+    let shopId = decodedText.trim();
+    try {
+      const url = new URL(decodedText);
+      const param = url.searchParams.get("id");
+      if (param) shopId = param;
+    } catch (_) {}
+
+    fetchShop(shopId);
+  }
+
+  async function fetchShop(id) {
+    try {
+      const res = await fetch(`${GAS_ENDPOINT}?id=${encodeURIComponent(id)}`);
+      const json = await res.json();
+      if (json.status === "success") {
+        const d = json.data;
+        document.getElementById("shopName").innerText = d["店舗名"] || "";
+        document.getElementById("shopCategory").innerText = d["カテゴリ"] || "";
+        document.getElementById("shopAddress").innerText = d["住所"] || "";
+        document.getElementById("shopHours").innerText = d["営業時間"] || "";
+        document.getElementById("shopNotes").innerText = d["備考"] || "";
+        document.getElementById("resultCard").style.display = "block";
+      } else {
+        showError(json.message || "データが見つかりませんでした。");
+      }
+    } catch (e) {
+      showError("通信エラー: " + e.message);
+    }
+  }
+</script>
+
+</body>
+</html>
